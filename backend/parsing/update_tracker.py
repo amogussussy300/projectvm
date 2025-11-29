@@ -57,3 +57,15 @@ def should_update() -> bool:
     days_since_update = (datetime.now() - last_update).days
     return days_since_update >= UPDATE_INTERVAL_DAYS
 
+
+def reset_update_date():
+    """Удалить файл отслеживания обновлений для принудительного парсинга"""
+    try:
+        if UPDATE_TRACKER_FILE.exists():
+            UPDATE_TRACKER_FILE.unlink()
+            return True
+        return False
+    except Exception as e:
+        print(f"Ошибка при удалении файла отслеживания: {e}")
+        return False
+

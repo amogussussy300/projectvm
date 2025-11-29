@@ -130,7 +130,7 @@ class ComponentParser:
             logger.warning("Продолжаю работу - DrissionPage попытается найти браузер автоматически")
             # Не прерываем выполнение, DrissionPage может найти браузер сам
     
-    def _parse_table(self, url: str, selector: str, timeout: int = 30) -> Optional[pd.DataFrame]:
+    def _parse_table(self, url: str, selector: str, timeout: int = 6) -> Optional[pd.DataFrame]:
         """
         Парсинг таблицы с указанного URL
         
@@ -200,21 +200,35 @@ class ComponentParser:
             logger.warning("Не найдена колонка с названием")
             return results
         
-        for _, row in df.iterrows():
+        skipped_count = 0
+        for idx, row in df.iterrows():
             try:
-                name = str(row.get(name_col, '')).strip()
-                consumption = str(row.get(power_col, '')).strip() if power_col else ''
+                # Получаем значения из строки
+                name_val = row.get(name_col) if name_col else None
+                consumption_val = row.get(power_col) if power_col else None
+                
+                # Преобразуем в строку и очищаем
+                name = str(name_val).strip() if name_val is not None and pd.notna(name_val) else ''
+                consumption = str(consumption_val).strip() if consumption_val is not None and pd.notna(consumption_val) else ''
                 
                 # Пропускаем пустые или некорректные значения
-                if name and name != 'nan' and name and consumption and consumption != 'nan':
+                if name and name.lower() != 'nan' and consumption and consumption.lower() != 'nan':
                     results.append({
                         'name': name,
                         'consumption': consumption
                     })
+                else:
+                    skipped_count += 1
+                    if skipped_count <= 3:  # Логируем первые 3 пропущенные строки для отладки
+                        logger.debug(f"Пропущена строка {idx}: name='{name}', consumption='{consumption}'")
             except Exception as e:
-                logger.debug(f"Ошибка при обработке строки: {e}")
+                logger.warning(f"Ошибка при обработке строки {idx}: {e}")
                 continue
         
+        if skipped_count > 0:
+            logger.info(f"Пропущено {skipped_count} строк с некорректными данными")
+        
+        logger.info(f"Извлечено {len(results)} валидных записей из {len(df)} строк")
         return results
     
     def parse_psu_data(self) -> List[Dict[str, str]]:
@@ -321,7 +335,7 @@ class ComponentParser:
             logger.info("Браузер закрыт")
 
 
-async def parse_and_load_data(session_maker, headless: bool = True):
+async def parse_and_load_data(session_maker, headless: bool = True, database=None):
     """
     Асинхронная функция для парсинга данных и загрузки в БД
     
@@ -344,6 +358,14 @@ async def parse_and_load_data(session_maker, headless: bool = True):
         
         logger.info(f"Парсинг завершен. Получено: CPU={len(results['cpus'])}, GPU={len(results['gpus'])}, PSU={len(results['psu'])}")
         
+        # Логируем примеры данных для отладки
+        if results['cpus']:
+            logger.info(f"Пример CPU данных (первые 3): {results['cpus'][:3]}")
+        if results['gpus']:
+            logger.info(f"Пример GPU данных (первые 3): {results['gpus'][:3]}")
+        if results['psu']:
+            logger.info(f"Пример PSU данных (первые 3): {results['psu'][:3]}")
+        
         # Загрузка данных в БД
         session = session_maker()
         try:
@@ -351,80 +373,134 @@ async def parse_and_load_data(session_maker, headless: bool = True):
             if results['cpus']:
                 logger.info(f"Загрузка {len(results['cpus'])} записей CPU в БД...")
                 added_count = 0
-                for cpu_data in results['cpus']:
+                error_count = 0
+                for idx, cpu_data in enumerate(results['cpus']):
                     try:
+                        name = cpu_data.get('name', '').strip()
+                        consumption = cpu_data.get('consumption', '').strip()
+                        
+                        if not name:
+                            logger.warning(f"CPU запись {idx}: пустое имя, пропускаю")
+                            continue
+                        
                         # Проверяем, существует ли уже запись
                         result = await session.execute(
-                            select(CPU).where(CPU.name == cpu_data['name'])
+                            select(CPU).where(CPU.name == name)
                         )
                         existing = result.scalar_one_or_none()
                         
                         if not existing:
                             cpu = CPU(
-                                name=cpu_data['name'],
-                                consumption=cpu_data['consumption']
+                                name=name,
+                                consumption=consumption
                             )
                             session.add(cpu)
                             added_count += 1
+                            if added_count <= 5:  # Логируем первые 5 добавленных
+                                logger.debug(f"Добавлен CPU: {name} ({consumption})")
+                        else:
+                            logger.debug(f"CPU уже существует: {name}")
                     except Exception as e:
-                        logger.debug(f"Ошибка при добавлении CPU {cpu_data.get('name', 'unknown')}: {e}")
+                        error_count += 1
+                        logger.warning(f"Ошибка при добавлении CPU {cpu_data.get('name', 'unknown')}: {e}")
+                        if error_count <= 3:  # Логируем первые 3 ошибки детально
+                            import traceback
+                            logger.debug(traceback.format_exc())
                         continue
                 
                 await session.commit()
-                logger.info(f"CPU данные загружены в БД: добавлено {added_count} новых записей")
+                logger.info(f"CPU данные загружены в БД: добавлено {added_count} новых записей из {len(results['cpus'])}")
+                if error_count > 0:
+                    logger.warning(f"Ошибок при загрузке CPU: {error_count}")
             
             # Загрузка GPU
             if results['gpus']:
                 logger.info(f"Загрузка {len(results['gpus'])} записей GPU в БД...")
                 added_count = 0
-                for gpu_data in results['gpus']:
+                error_count = 0
+                for idx, gpu_data in enumerate(results['gpus']):
                     try:
+                        name = gpu_data.get('name', '').strip()
+                        consumption = gpu_data.get('consumption', '').strip()
+                        
+                        if not name:
+                            logger.warning(f"GPU запись {idx}: пустое имя, пропускаю")
+                            continue
+                        
                         result = await session.execute(
-                            select(GPU).where(GPU.name == gpu_data['name'])
+                            select(GPU).where(GPU.name == name)
                         )
                         existing = result.scalar_one_or_none()
                         
                         if not existing:
                             gpu = GPU(
-                                name=gpu_data['name'],
-                                consumption=gpu_data['consumption']
+                                name=name,
+                                consumption=consumption
                             )
                             session.add(gpu)
                             added_count += 1
+                            if added_count <= 5:  # Логируем первые 5 добавленных
+                                logger.debug(f"Добавлен GPU: {name} ({consumption})")
+                        else:
+                            logger.debug(f"GPU уже существует: {name}")
                     except Exception as e:
-                        logger.debug(f"Ошибка при добавлении GPU {gpu_data.get('name', 'unknown')}: {e}")
+                        error_count += 1
+                        logger.warning(f"Ошибка при добавлении GPU {gpu_data.get('name', 'unknown')}: {e}")
+                        if error_count <= 3:
+                            import traceback
+                            logger.debug(traceback.format_exc())
                         continue
                 
                 await session.commit()
-                logger.info(f"GPU данные загружены в БД: добавлено {added_count} новых записей")
+                logger.info(f"GPU данные загружены в БД: добавлено {added_count} новых записей из {len(results['gpus'])}")
+                if error_count > 0:
+                    logger.warning(f"Ошибок при загрузке GPU: {error_count}")
             
             # Загрузка PSU как Cooling (или можно создать отдельную таблицу)
             if results['psu']:
                 logger.info(f"Загрузка {len(results['psu'])} записей PSU в БД...")
                 added_count = 0
-                for psu_data in results['psu']:
+                error_count = 0
+                for idx, psu_data in enumerate(results['psu']):
                     try:
+                        name = psu_data.get('name', '').strip()
+                        consumption = psu_data.get('consumption', '').strip()
+                        
+                        if not name:
+                            logger.warning(f"PSU запись {idx}: пустое имя, пропускаю")
+                            continue
+                        
                         result = await session.execute(
-                            select(Cooling).where(Cooling.name == psu_data['name'])
+                            select(Cooling).where(Cooling.name == name)
                         )
                         existing = result.scalar_one_or_none()
                         
                         if not existing:
                             # PSU можно сохранить как Cooling с дефолтными значениями
                             cooling = Cooling(
-                                name=psu_data['name'],
-                                consumption=psu_data['consumption'],
+                                name=name,
+                                consumption=consumption,
                                 size="N/A",  # Для PSU размер не применим
                                 has_led=False
                             )
                             session.add(cooling)
                             added_count += 1
+                            if added_count <= 5:  # Логируем первые 5 добавленных
+                                logger.debug(f"Добавлен PSU: {name} ({consumption})")
+                        else:
+                            logger.debug(f"PSU уже существует: {name}")
                     except Exception as e:
-                        logger.debug(f"Ошибка при добавлении PSU {psu_data.get('name', 'unknown')}: {e}")
+                        error_count += 1
+                        logger.warning(f"Ошибка при добавлении PSU {psu_data.get('name', 'unknown')}: {e}")
+                        if error_count <= 3:
+                            import traceback
+                            logger.debug(traceback.format_exc())
                         continue
                 
                 await session.commit()
-                logger.info(f"PSU данные загружены в БД: добавлено {added_count} новых записей")
+                logger.info(f"PSU данные загружены в БД: добавлено {added_count} новых записей из {len(results['psu'])}")
+                if error_count > 0:
+                    logger.warning(f"Ошибок при загрузке PSU: {error_count}")
             
             logger.info("Все данные успешно загружены в БД")
             

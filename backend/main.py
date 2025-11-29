@@ -7,7 +7,7 @@ from database import database
 from database.database import engine, Base
 from routers import cpus, gpus, system, ram, storages, cooling
 from parsing import parse_and_load_data
-from parsing.update_tracker import should_update, save_update_date, get_last_update_date
+from parsing.update_tracker import should_update, save_update_date, get_last_update_date, reset_update_date
 
 # Настройка логирования
 logging.basicConfig(
@@ -41,12 +41,17 @@ async def lifespan(app: FastAPI):
     should_parse = os.getenv("SKIP_PARSING", "false").lower() != "true"
     
     if should_parse:
+        # Проверяем, нужно ли принудительно обновить данные
+        force_parsing = os.getenv("FORCE_PARSING", "false").lower() == "true"
+        
         # Проверяем, нужно ли обновлять данные (раз в полгода)
-        needs_update = should_update()
+        needs_update = force_parsing or should_update()
         
         if needs_update:
             last_update = get_last_update_date()
-            if last_update:
+            if force_parsing:
+                logger.info("Принудительный парсинг данных (FORCE_PARSING=true)")
+            elif last_update:
                 days_since = (datetime.now() - last_update).days
                 logger.info(f"Последнее обновление было {days_since} дней назад. Требуется обновление.")
             else:
@@ -127,4 +132,51 @@ async def parsing_status():
             "days_since_update": None,
             "needs_update": True,
             "update_interval_days": 180
+        }
+
+@app.post("/parsing/force-update")
+async def force_update_parsing():
+    """
+    Принудительно запустить парсинг данных, игнорируя дату последнего обновления.
+    Сбрасывает дату последнего обновления и запускает парсинг заново.
+    """
+    from parsing import parse_and_load_data
+    import os
+    
+    try:
+        logger.info("Запуск принудительного парсинга данных...")
+        
+        # Сбрасываем дату последнего обновления
+        reset_update_date()
+        logger.info("Дата последнего обновления сброшена")
+        
+        # Определяем режим headless
+        headless = os.getenv("HEADLESS", "true").lower() == "true"
+        
+        # Запускаем парсинг и загрузку данных
+        await parse_and_load_data(
+            database.new_session,
+            headless=headless
+        )
+        
+        # Сохраняем дату обновления
+        save_update_date()
+        
+        logger.info("Принудительный парсинг завершен успешно")
+        
+        return {
+            "success": True,
+            "message": "Парсинг данных выполнен успешно",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Ошибка при принудительном парсинге: {e}")
+        logger.error(f"Детали ошибки:\n{error_details}")
+        
+        return {
+            "success": False,
+            "message": f"Ошибка при парсинге: {str(e)}",
+            "error": str(e)
         }

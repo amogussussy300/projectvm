@@ -13,6 +13,9 @@ class GPUCreate(ComponentCreate):
 class RAMCreate(ComponentCreate):
     pass
 
+class PSUCreate(ComponentCreate):
+    pass
+
 class StorageCreate(ComponentCreate):
     type: str
 

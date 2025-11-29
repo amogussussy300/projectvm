@@ -12,6 +12,9 @@ class CPU(ComponentBase):
 class GPU(ComponentBase):
     __tablename__ = "gpus"
 
+class PSU(ComponentBase):
+    __tablename__ = "psus"
+
 class RAM(ComponentBase):
     __tablename__ = "ram"
 

@@ -343,7 +343,7 @@ async def parse_and_load_data(session_maker, headless: bool = True, database=Non
         session_maker: AsyncSessionMaker для создания сессий БД
         headless: Запуск браузера в headless режиме
     """
-    from database.models import CPU, GPU, Cooling
+    from database.models import CPU, GPU, Cooling, PSU
     from sqlalchemy import select
     
     logger.info("Начинаю парсинг данных...")
@@ -455,8 +455,7 @@ async def parse_and_load_data(session_maker, headless: bool = True, database=Non
                 logger.info(f"GPU данные загружены в БД: добавлено {added_count} новых записей из {len(results['gpus'])}")
                 if error_count > 0:
                     logger.warning(f"Ошибок при загрузке GPU: {error_count}")
-            
-            # Загрузка PSU как Cooling (или можно создать отдельную таблицу)
+
             if results['psu']:
                 logger.info(f"Загрузка {len(results['psu'])} записей PSU в БД...")
                 added_count = 0
@@ -471,19 +470,16 @@ async def parse_and_load_data(session_maker, headless: bool = True, database=Non
                             continue
                         
                         result = await session.execute(
-                            select(Cooling).where(Cooling.name == name)
+                            select(PSU).where(PSU.name == name)
                         )
                         existing = result.scalar_one_or_none()
                         
                         if not existing:
-                            # PSU можно сохранить как Cooling с дефолтными значениями
-                            cooling = Cooling(
+                            psu = PSU(
                                 name=name,
                                 consumption=consumption,
-                                size="N/A",  # Для PSU размер не применим
-                                has_led=False
                             )
-                            session.add(cooling)
+                            session.add(psu)
                             added_count += 1
                             if added_count <= 5:  # Логируем первые 5 добавленных
                                 logger.debug(f"Добавлен PSU: {name} ({consumption})")

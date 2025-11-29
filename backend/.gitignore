@@ -1,0 +1,24 @@
+# База данных
+*.db
+*.db-journal
+
+# Файл отслеживания обновлений
+.last_update.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+

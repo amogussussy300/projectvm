@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from database import database
 from database.database import engine, Base
-from routers import cpus, gpus, system, ram, storages, cooling
+from routers import cpus, gpus, system, ram, storages, cooling, psus
 from parsing import parse_and_load_data
 from parsing.update_tracker import should_update, save_update_date, get_last_update_date, reset_update_date
 
@@ -104,6 +104,7 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(system.router)
 app.include_router(cpus.router)
 app.include_router(gpus.router)
+app.include_router(psus.router)
 app.include_router(ram.router)
 app.include_router(storages.router)
 app.include_router(cooling.router)

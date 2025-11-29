@@ -59,6 +59,8 @@ async def lifespan(app: FastAPI):
                 # Для локальной разработки можно установить HEADLESS=false
                 headless = os.getenv("HEADLESS", "true").lower() == "true"
                 
+                logger.info(f"Режим headless: {headless}")
+                
                 # Запускаем парсинг и загрузку данных
                 await parse_and_load_data(
                     database.new_session,
@@ -69,7 +71,11 @@ async def lifespan(app: FastAPI):
                 save_update_date()
                 logger.info("Парсинг и загрузка данных завершены успешно")
             except Exception as e:
+                import traceback
+                error_details = traceback.format_exc()
                 logger.error(f"Ошибка при парсинге данных: {e}")
+                logger.error(f"Детали ошибки:\n{error_details}")
+                logger.warning("Приложение продолжит работу с существующими данными в БД")
                 # Не прерываем запуск приложения, если парсинг не удался
                 # API все равно будет работать с существующими данными
         else:

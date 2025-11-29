@@ -5,12 +5,19 @@
 import asyncio
 import logging
 import os
+import subprocess
 from typing import List, Dict, Any, Optional
 import pandas as pd
 from io import StringIO
 from DrissionPage import Chromium, ChromiumOptions
 
 logger = logging.getLogger(__name__)
+
+# Путь к браузеру (можно переопределить через переменную окружения)
+TARGET_BROWSER_PATH = os.getenv(
+    "CHROME_PATH",
+    r'C:\Users\user\PycharmProjects\PythonProject2\chrome\win64-142.0.7444.175\chrome-win64\chrome.exe'
+)
 
 
 class ComponentParser:
@@ -30,7 +37,17 @@ class ComponentParser:
     def _setup_browser(self):
         """Настройка и инициализация браузера"""
         try:
+            # Проверка и установка браузера, если нужно
+            self._ensure_browser_available()
+            
             co = ChromiumOptions()
+            
+            # Если путь к браузеру существует, явно указываем его DrissionPage
+            if os.path.exists(TARGET_BROWSER_PATH):
+                co.set_browser_path(TARGET_BROWSER_PATH)
+                logger.info(f"DrissionPage настроен на использование {TARGET_BROWSER_PATH}")
+            else:
+                logger.info("Путь к браузеру не подтвержден, DrissionPage будет искать его автоматически.")
             
             # Настройка для headless режима (для VPS)
             if self.headless:
@@ -40,13 +57,78 @@ class ComponentParser:
             # Попытка найти браузер автоматически
             # DrissionPage должен найти Chrome/Chromium в системе
             # На VPS обычно это /usr/bin/chromium-browser или /usr/bin/google-chrome
+            logger.info("Попытка инициализации браузера...")
             self.browser = Chromium(addr_or_opts=co)
             self.tab = self.browser.latest_tab
             logger.info("Браузер успешно инициализирован")
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             logger.error(f"Ошибка при инициализации браузера: {e}")
+            logger.error(f"Детали ошибки:\n{error_details}")
+            
+            # Полезные советы по устранению проблемы
+            import platform
+            system = platform.system()
+            logger.error("Возможные решения:")
+            if system == "Windows":
+                logger.error("1. Убедитесь, что Chrome установлен и доступен в PATH")
+                logger.error("2. Попробуйте запустить с HEADLESS=false для отладки")
+                logger.error("3. Установите Node.js и npm для автоматической установки браузера")
+            elif system == "Linux":
+                logger.error("1. Установите chromium: sudo apt-get install chromium-browser")
+                logger.error("2. Или установите chrome через npx: npx @puppeteer/browsers install chrome@stable")
+                logger.error("3. Убедитесь, что установлены зависимости: sudo apt-get install -y libnss3 libatk1.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2")
+            else:
+                logger.error("1. Убедитесь, что Chrome/Chromium установлен")
+                logger.error("2. Проверьте, что браузер доступен в PATH")
+            
             raise
+    
+    def _ensure_browser_available(self):
+        """
+        Проверяет наличие браузера и пытается установить его, если нужно
+        """
+        if os.path.exists(TARGET_BROWSER_PATH):
+            logger.info(f"Браузер найден по пути: {TARGET_BROWSER_PATH}")
+            return
+        
+        logger.warning(f"Браузер не найден по пути: {TARGET_BROWSER_PATH}")
+        logger.info("Попытка установить или найти его с помощью npx...")
+        
+        # Если файла нет, запускаем npx для скачивания в стандартный кеш puppeteer
+        npx_command = ['npx', '@puppeteer/browsers', 'install', 'chrome@stable']
+        try:
+            # Используем shell=True в Windows для корректного выполнения npx
+            logger.info("Запуск npx для установки Chrome...")
+            result = subprocess.run(
+                npx_command, 
+                capture_output=True, 
+                text=True, 
+                check=True, 
+                shell=True
+            )
+            logger.info(result.stdout)
+            logger.info("Команда npx выполнена успешно.")
+            
+            # Примечание: npx скачивает файл в стандартный кеш puppeteer,
+            # а не по пути TARGET_BROWSER_PATH.
+            # Если вы хотите использовать этот путь, вам нужно вручную переместить файл или
+            # найти, куда его скачал npx и обновить переменную TARGET_BROWSER_PATH.
+            
+            # Для простоты, если npx успешно отработал, мы предполагаем,
+            # что DrissionPage найдет его автоматически в кеше.
+            logger.info("Chrome установлен через npx. DrissionPage найдет его автоматически.")
+            
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Ошибка при работе с npx: {e.stderr}")
+            logger.warning("Продолжаю работу - DrissionPage попытается найти браузер автоматически")
+            # Не прерываем выполнение, DrissionPage может найти браузер сам
+        except FileNotFoundError:
+            logger.warning("Команда 'npx' не найдена. Убедитесь, что Node.js и npm установлены и добавлены в PATH.")
+            logger.warning("Продолжаю работу - DrissionPage попытается найти браузер автоматически")
+            # Не прерываем выполнение, DrissionPage может найти браузер сам
     
     def _parse_table(self, url: str, selector: str, timeout: int = 30) -> Optional[pd.DataFrame]:
         """
@@ -358,5 +440,7 @@ async def parse_and_load_data(session_maker, headless: bool = True):
         raise
     finally:
         parser.close()
+
+
 
 

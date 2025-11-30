@@ -14,6 +14,7 @@ class Config(Base):
     ram = Column(String(100))
     mem = Column(String(100))
     watts = Column(String(50))
+    psus = Column(String(1200))
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

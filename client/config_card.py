@@ -4,89 +4,126 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QColor, QAction
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout,
-    QLabel, QFrame, QGraphicsDropShadowEffect, QWidget, QMenu, QInputDialog, QFileDialog, QMessageBox, QDialog
+    QLabel, QFrame, QGraphicsDropShadowEffect, QWidget, QMenu, QInputDialog, QFileDialog, QMessageBox, QDialog,
+    QSizePolicy
 )
+
 
 
 class ConfigCard(QFrame):
     request_delete = pyqtSignal(object)
     renamed = pyqtSignal(object, str)
 
-    def __init__(self, win_height, name, cpu, gpu, ram, mem, date, watts="---", db_id=None):
+    def __init__(self, win_height, name, cpu, gpu, ram, mem, date, watts="---", psus=None, db_id=None):
         super().__init__()
         self._db_id = db_id
-        self._name = name
-
-        self._cpu = cpu
-        self._gpu = gpu
-        self._ram = ram
-        self._mem = mem
+        self._name = name or ""
+        self._cpu = cpu or ""
+        self._gpu = gpu or ""
+        self._ram = ram or ""
+        self._mem = mem or ""
         self._watts = watts
         self._date = date if hasattr(date, "strftime") else datetime.now()
+
+        self._psus = psus or []
 
         self.setObjectName("ConfigCard")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setMouseTracking(True)
 
-        print("ConfigCard objectName:", self.objectName())
-        print("WA_StyledBackground:", self.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
+        base_min = int((win_height or 700) * 0.12)
+        extra = min(120, 18 * max(0, len(self._psus)))
+        self.setMinimumHeight(base_min + extra)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
 
-        self.setFixedHeight(int(win_height * 0.18))
-
-        self.setStyleSheet(":hover {border: 1px solid #3b82f6; background-color: #1e293b;}") # +
+        self.setStyleSheet(":hover {border: 1px solid #3b82f6; background-color: #1e293b;}")
 
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)
-        shadow.setColor(QColor(0, 0, 0, 80))
-        shadow.setOffset(0, 4)
+        shadow.setBlurRadius(12)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        shadow.setOffset(0, 3)
         self.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
 
         header = QHBoxLayout()
         self.name_lbl = QLabel(self._name)
         self.name_lbl.setObjectName("ConfigCardName")
-        self.name_lbl.setStyleSheet(
-            "font-weight: bold; font-size: 15px; color: white; border: none; background: transparent;"
-        ) # +
+        self.name_lbl.setStyleSheet("font-weight: bold; font-size: 15px; color: white; border: none; background: transparent;")
         header.addWidget(self.name_lbl)
         header.addStretch()
 
         formatted_time = self._date.strftime("%b %d, %Y в %I:%M %p")
         self.date_lbl = QLabel(formatted_time)
-        self.date_lbl.setStyleSheet("color: #64748b; font-size: 11px; border: none; background: transparent;") # +
+        self.date_lbl.setStyleSheet("color: #64748b; font-size: 11px; border: none; background: transparent;")
         header.addWidget(self.date_lbl)
         layout.addLayout(header)
 
-        cpu_lbl = QLabel(f"CPU: {cpu}")
-        cpu_lbl.setStyleSheet("border: none; background: transparent;") # +
-        layout.addWidget(cpu_lbl)
+        self.cpu_lbl = QLabel(f"CPU: {self._cpu}")
+        self.cpu_lbl.setStyleSheet("border: none; background: transparent; color: #e6eef8;")
+        layout.addWidget(self.cpu_lbl)
 
-        gpu_lbl = QLabel(f"GPU: {gpu}")
-        gpu_lbl.setStyleSheet("border: none; background: transparent;") # +
-        layout.addWidget(gpu_lbl)
+        self.gpu_lbl = QLabel(f"GPU: {self._gpu}")
+        self.gpu_lbl.setStyleSheet("border: none; background: transparent; color: #e6eef8;")
+        layout.addWidget(self.gpu_lbl)
 
-        ram_lbl = QLabel(f"RAM: {ram}")
-        ram_lbl.setStyleSheet("border: none; background: transparent;") # +
-        layout.addWidget(ram_lbl)
+        self.ram_lbl = QLabel(f"RAM: {self._ram}")
+        self.ram_lbl.setStyleSheet("border: none; background: transparent; color: #e6eef8;")
+        layout.addWidget(self.ram_lbl)
 
-        mem_lbl = QLabel(f"MEM: {mem}")
-        mem_lbl.setStyleSheet("border: none; background: transparent;") # +
-        layout.addWidget(mem_lbl)
+        self.mem_lbl = QLabel(f"MEM: {self._mem}")
+        self.mem_lbl.setStyleSheet("border: none; background: transparent; color: #e6eef8;")
+        layout.addWidget(self.mem_lbl)
 
         footer = QHBoxLayout()
         footer.addStretch()
-        res_lbl = QLabel(f"{watts}W рекомендуется")
-        res_lbl.setStyleSheet("color: #60a5fa; font-weight: bold; border: none; background: transparent;") # +
-        footer.addWidget(res_lbl)
+        self.res_lbl = QLabel(f"{self._watts}W рекомендуется")
+        self.res_lbl.setStyleSheet("color: #60a5fa; font-weight: bold; border: none; background: transparent;")
+        footer.addWidget(self.res_lbl)
         layout.addLayout(footer)
+
+        self.psu_lbl = QLabel()
+        self.psu_lbl.setWordWrap(True)
+        self.psu_lbl.setStyleSheet("color: #cbd5e1; font-size: 11px; border: none; background: transparent;")
+        max_lines = min(6, max(1, len(self._psus)))
+        self.psu_lbl.setMaximumHeight(18 * max_lines)
+        self.psu_lbl.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
+        layout.addWidget(self.psu_lbl)
+
+        self._refresh_psu_label()
 
         for child in self.findChildren(QWidget):
             if child is self:
                 continue
             child.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             child.setMouseTracking(True)
+
+    def _refresh_psu_label(self):
+        if self._psus:
+            parts = []
+            for p in self._psus:
+                if isinstance(p, dict):
+                    name = p.get("name", "")
+                    watt = p.get("wattage", "")
+                    parts.append(f"{name} ({watt}W)")
+                else:
+                    parts.append(str(p))
+            text = "; ".join(parts)
+        else:
+            text = "Нет рекомендаций PSU"
+        self.psu_lbl.setText(f"Рекомендуемые БП: {text}")
+        max_lines = min(6, max(1, len(self._psus)))
+        self.psu_lbl.setMaximumHeight(18 * max_lines)
+
+    def update_psus(self, psus: list, required: int | None = None):
+        self._psus = psus or []
+        if required is not None:
+            self._watts = required
+            self.res_lbl.setText(f"{self._watts}W рекомендуется")
+        self._refresh_psu_label()
 
 
     def enterEvent(self, event):
@@ -151,7 +188,6 @@ class ConfigCard(QFrame):
                     except Exception:
                         pass
 
-                    # print(f"ConfigCard переименован -> internal: {self._name}, label: {self.name_lbl.text()}")
         except Exception as e:
             print("не удалось переименовать configcard:", e)
 
@@ -189,6 +225,7 @@ class ConfigCard(QFrame):
             f"GPU: {self._gpu}",
             f"RAM: {self._ram}",
             f"MEM: {self._mem}",
+            f"PSUs: {' '.join(map(str, self._psus))}"
             f"Рекомендовано ватт: {self._watts}W",
         ]
         return "\n".join(lines)

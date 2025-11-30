@@ -1,0 +1,64 @@
+from DrissionPage import Chromium, ChromiumOptions
+import pandas as pd
+import os
+from io import StringIO
+import re
+
+co = ChromiumOptions()
+
+edge_path = r"C:\Users\user\PycharmProjects\PythonProject2\chrome\win64-142.0.7444.175\chrome-win64\chrome.exe"
+
+if not os.path.exists(edge_path):
+    print(f"Внимание: Файл Edge не найден по пути: {edge_path}. Будет попытка использовать Chrome по умолчанию.")
+else:
+    co.set_browser_path(edge_path)
+
+# Инициализируем браузер
+browser = Chromium(addr_or_opts=co)
+tab = browser.latest_tab
+
+link = "https://www.techpowerup.com/cpu-specs/"
+
+selectors = [
+    'xpath://div[contains(@class, "table")]//table'
+]
+
+for i, selector in enumerate(selectors):
+    print(f"\n=== Делаем селект: {selector} ===")
+
+    try:
+        tab.get(link)
+
+        ele = tab.ele(selector, timeout=6)
+
+        if ele:
+            table_html = ele.html
+            try:
+                # Читаем все таблицы из HTML
+                tables = pd.read_html(StringIO(table_html))
+                if tables:
+                    # Берем первую найденную таблицу
+                    data = tables[0]
+
+
+
+                    # Сохраняем в JSON
+                    json_str = data.to_json(orient='records', indent=2, force_ascii=False)
+                    print(json_str)
+
+                    # Также сохраняем в CSV файл для каждого сайта
+                    filename = f"data_{i + 1}.csv"
+                    data.to_csv(filename, index=False, encoding='utf-8')
+                    print(f"Данные сохранены в файл: {filename}")
+                else:
+                    print("Не удалось распарсить таблицу")
+            except Exception as e:
+                print(f"Ошибка при парсинге таблицы: {e}")
+        else:
+            print("Элемент таблицы не найден.")
+
+    except Exception as e:
+        print(f"Ошибка при обработке сайта {link}: {e}")
+
+print("\n=== Обработка завершена ===")
+browser.quit()

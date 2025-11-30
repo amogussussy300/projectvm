@@ -8,7 +8,7 @@ import logging
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
-from .cpu_parser import parse_cpus_optimized
+from .cpu_parser import parse_cpus_clean
 from .gpu_parser import parse_gpus_optimized
 from .psu_parser import parse_psus_optimized
 
@@ -92,7 +92,7 @@ def parse_all_components() -> Dict[str, List[Dict[str, str]]]:
     try:
         # Парсинг CPU
         logger.info("Начинаю парсинг CPU...")
-        cpu_df = parse_cpus_optimized(start_page=1, end_page=120)
+        cpu_df = parse_cpus_clean()
         if not cpu_df.empty:
             results['cpus'] = _extract_name_and_consumption(
                 cpu_df,
@@ -118,51 +118,95 @@ def parse_all_components() -> Dict[str, List[Dict[str, str]]]:
 
         # Парсинг PSU
         logger.info("Начинаю парсинг PSU...")
-        psu_df = parse_psus_optimized(start_page=1, end_page=120)
+        psu_df = parse_psus_optimized()
+
         if not psu_df.empty:
-            # Для PSU используем wattage вместо consumption
             psu_results = []
             logger.info(f"Доступные колонки PSU: {list(psu_df.columns)}")
-            
-            name_keywords = ['psu name', 'name', 'psu', 'model', 'product']
-            wattage_keywords = ['wattage', 'power', 'watt', 'watts']
-            
-            name_cols = [col for col in psu_df.columns
-                        if any(keyword.lower() in str(col).lower() for keyword in name_keywords)]
-            wattage_cols = [col for col in psu_df.columns
-                           if any(keyword.lower() in str(col).lower() for keyword in wattage_keywords)]
-            
-            name_col = name_cols[0] if name_cols else (psu_df.columns[0] if len(psu_df.columns) > 0 else None)
-            wattage_col = wattage_cols[0] if wattage_cols else (psu_df.columns[1] if len(psu_df.columns) > 1 else None)
-            
-            if name_col:
-                skipped_count = 0
-                for idx, row in psu_df.iterrows():
-                    try:
-                        name_val = row.get(name_col) if name_col else None
-                        wattage_val = row.get(wattage_col) if wattage_col else None
-                        
-                        name = str(name_val).strip() if name_val is not None and pd.notna(name_val) else ''
-                        wattage = str(wattage_val).strip() if wattage_val is not None and pd.notna(wattage_val) else ''
-                        
-                        if name and name.lower() != 'nan' and wattage and wattage.lower() != 'nan':
-                            psu_results.append({
-                                'name': name,
-                                'consumption': wattage  # Используем consumption для совместимости
-                            })
-                        else:
-                            skipped_count += 1
-                    except Exception as e:
-                        logger.warning(f"Ошибка при обработке PSU строки {idx}: {e}")
+
+            cols_lower = {col: col.lower() for col in psu_df.columns}
+
+            manufacturer_col = None
+            for col, col_l in cols_lower.items():
+                if "manufacturer" in col_l:
+                    manufacturer_col = col
+                    break
+
+            model_col = None
+            for col, col_l in cols_lower.items():
+                if "model" in col_l and col != manufacturer_col:
+                    model_col = col
+                    break
+
+            def extract_wattage(text):
+                if text is None or (isinstance(text, float) and pd.isna(text)):
+                    return None
+                s = str(text)
+
+                m = re.search(r"(\d{2,5})\s*[Ww]\b", s)
+                if m:
+                    return m.group(1)
+                m2 = re.search(r"\b([1-9]\d{2,3})\b", s)
+                if m2:
+                    return m2.group(1)
+                m3 = re.search(r"\b([6-9]\d)\b", s)
+                if m3:
+                    return m3.group(1)
+                return None
+
+            def find_wattage(row):
+                if model_col and model_col in psu_df.columns:
+                    v = row.get(model_col)
+                    res = extract_wattage(v)
+                    if res:
+                        return res
+
+                if manufacturer_col and manufacturer_col in psu_df.columns:
+                    v = row.get(manufacturer_col)
+                    res = extract_wattage(v)
+                    if res:
+                        return res
+
+                for col in psu_df.columns:
+                    if col in {manufacturer_col, model_col}:
                         continue
-                
-                if skipped_count > 0:
-                    logger.info(f"Пропущено {skipped_count} строк PSU с некорректными данными")
-                
-                results['psu'] = psu_results
-                logger.info(f"Распарсено {len(results['psu'])} записей PSU")
-            else:
-                logger.warning("Не найдена колонка с названием PSU")
+                    v = row.get(col)
+                    res = extract_wattage(v)
+                    if res:
+                        return res
+                return None
+
+
+            for idx, row in psu_df.iterrows():
+                try:
+                    parts = []
+                    if manufacturer_col and manufacturer_col in psu_df.columns:
+                        man_val = row.get(manufacturer_col)
+                        if pd.notna(man_val) and str(man_val).strip().lower() != "nan":
+                            parts.append(str(man_val).strip())
+                    if model_col and model_col in psu_df.columns and model_col != manufacturer_col:
+                        mod_val = row.get(model_col)
+                        if pd.notna(mod_val) and str(mod_val).strip().lower() != "nan":
+                            parts.append(str(mod_val).strip())
+
+                    name = " ".join(parts).strip()
+                    if name == "":
+                        name = None
+
+                    watt = find_wattage(row)
+
+                    if name:
+                        psu_results.append({
+                            'name': name,
+                            'consumption': watt
+                        })
+
+                except Exception as e:
+                    logger.warning(f"Ошибка при обработке PSU строки {idx}: {e}")
+                    continue
+
+            results['psu'] = psu_results
+            logger.info(f"Распарсено {len(results['psu'])} записей PSU")
         else:
             logger.warning("PSU DataFrame пуст")
 

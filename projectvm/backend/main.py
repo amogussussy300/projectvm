@@ -8,6 +8,7 @@ from database.database import engine, Base
 from routers import cpus, gpus, system, ram, storages, cooling, psus
 from parsing import parse_and_load_data
 from parsing.update_tracker import should_update, save_update_date, get_last_update_date, reset_update_date
+from sqlalchemy import text
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,29 +32,30 @@ async def lifespan(app: FastAPI):
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
         logger.info("База данных инициализирована")
     except Exception as e:
         logger.error(f"Ошибка при создании БД: {e}")
         # Продолжаем работу, возможно БД уже существует
 
-        try:
-            logger.info("Начинаю парсинг данных и загрузку в БД...")
-            # Определяем, запущено ли на VPS (headless режим)
-            # По умолчанию используем headless для продакшена
-            # Для локальной разработки можно установить HEADLESS=false
-            headless = os.getenv("HEADLESS", "true").lower() == "true"
+    try:
+        logger.info("Начинаю парсинг данных и загрузку в БД...")
+        # Определяем, запущено ли на VPS (headless режим)
+        # По умолчанию используем headless для продакшена
+        # Для локальной разработки можно установить HEADLESS=false
+        headless = os.getenv("HEADLESS", "true").lower() == "true"
 
-            logger.info(f"Режим headless: {headless}")
+        logger.info(f"Режим headless: {headless}")
 
-            # Запускаем парсинг и загрузку данных
-            await parse_and_load_data(
-                database.new_session,
-                headless=headless
-            )
+        # Запускаем парсинг и загрузку данных
+        await parse_and_load_data(
+            database.new_session,
+            headless=headless
+        )
 
-            logger.info("Парсинг и загрузка данных завершены успешно")
-        except Exception as e:
-            logger.error(f"Ошибка при парсинге данных: {e}")
+        logger.info("Парсинг и загрузка данных завершены успешно")
+    except Exception as e:
+        logger.error(f"Ошибка при парсинге данных: {e}")
 
     yield
 
